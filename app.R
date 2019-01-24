@@ -1,3 +1,5 @@
+# A shiny web app to explore the discharge record of the Gribble Gap watershed in Cullowhee, NC
+# J.P. Gannon
 #
 # This is a Shiny web application. You can run the application by clicking
 # the 'Run App' button above.
