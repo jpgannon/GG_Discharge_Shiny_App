@@ -14,18 +14,28 @@ library(shinythemes)
 library(dplyr)
 library(readr)
 
-#load data
+#load data when running locally
 #setwd("~/OneDrive - Western Carolina University/Gribble Gap Discharge/GG_Discharge")
 #Q <- read.csv("GribbleGap_Q_to_SEP17.csv")
 
-##When updating data remember to add NA values for gaps... Jan 1 2016 and May 1
+#When updating data remember to add NA values for gaps... Jan 1 2016 and May 1
+
+#Read hourly discharge data and set up date time column
 Q <- read.csv("GGQ_to_JAN19_hourly.csv")
 Q$time <- strptime(Q$time, format = "%Y-%m-%d %H:%M:%S")
 Q$time <- as.POSIXct(Q$time)
+
+#old code to convert to mmd, this is now in the data file
 #Q$GGwsd <- Q$disch * 0.2009302 #1 L/s = 0.2009302 mmd
+
+#Remove NAs from Q, this is now done before using in this app
 #Q_narm <- Q[-which(is.na(Q$disch)==TRUE),]
+
+#Q_narm must not have NA's
 Q_narm <- Q
 
+#Read precip data. Currently from: 
+#https://www.ncdc.noaa.gov/cdo-web/datasets/GHCND/stations/GHCND:USC00312200/detail
 P <- read.csv("Cullowhee Precip 2015-2018.csv")
 P$Date <- strptime(P$Date, format = "%m/%d/%y")
 P$Date <- as.POSIXct(P$Date)
@@ -37,11 +47,14 @@ Probs_all <- ecdf_all(Qrange_all)
 
 # Define UI
 ui <- fluidPage(theme = shinytheme("lumen"),
+                
+                #title
                 titlePanel("Gribble Gap Discharge (beta)"),
+                
                 sidebarLayout(
                   sidebarPanel(
                     
-                    # Select type of trend to plot
+                    # Select type data to plot
                     selectInput(inputId = "type", label = strong("Parameter"),
                                 choices = c("Discharge (L/s)","Discharge (mm/day)","Water Temperature (C)"),
                                 selected = "Discharge (L/s)"),
@@ -50,29 +63,35 @@ ui <- fluidPage(theme = shinytheme("lumen"),
                     dateRangeInput("date", strong("Date range"), start = "2015-08-01", end = "2019-01-10",
                                    min = "2015-08-01", max = "2019-1-10"),
                     
-                    # Select whether to overlay smooth trend line
+                    # Select whether to log primary axis
                     checkboxInput(inputId = "log", label = strong("Log primary y axis."), value = FALSE),
+                    
+                    # Select to show calculated baseflow, and choose filter parameter
                     checkboxInput(inputId = "bf", label = strong("Show calculated baseflow."), value = FALSE),
                     numericInput(inputId = "filter", label = "Filter parameter for baseflow calculation", value = 0.925, min = 0, max = 1),
+                   
+                    #select to show water temperature
                     checkboxInput(inputId = "temp", label = strong("Show water temperature."), value = FALSE),
+                    
+                    #select to show precip. Precip is now shown by default
                     #checkboxInput(inputId = "precip", label = strong("Show precipitation.(Temporarily from wunderground, gaps present)"), value = TRUE),
+                    
+                    #change precip bar width using a slider
                     sliderInput(inputId = "pwidth", label = strong("Precip bar width (note: precip data is incomplete)"), min = 1, max = 10, value = 1),
+                    
+                    #change the size of the text in the plot using a slider
                     sliderInput(inputId = "mag", label = strong("Plot text magnification."), min = 0.5, max = 2, value = 1),
                      
-                    
+                    #add a horizontal line to the plot to facilitate data comparisons
                     numericInput(inputId = "horizLine", label = "Add a horizontal line at:", value = NA, min = 0, max = 100),
                     
-                    conditionalPanel(condition = "input.log == true"
-                                     
-                                     # ,HTML("Log Y axis.")
-                    )
+                    conditionalPanel(condition = "input.log == true")
                   ),
                   
-                  # Output: Description, lineplot, and reference
+                  # Output: Set up plot panel
                   mainPanel(
                     plotOutput(outputId = "lineplot", height = "500px"),
                     textOutput(outputId = "desc")#,
-                    #tags$a(href = "https://www.google.com/finance/domestic_trends", "Source: Google Domestic Trends", target = "_blank")
                   )
                 )
 )
@@ -80,7 +99,7 @@ ui <- fluidPage(theme = shinytheme("lumen"),
 # Define server function
 server <- function(input, output) {
   
-  # Subset data
+  # Subset discharge data based on date range
   selected_data <- reactive({
     req(input$date)
     validate(need(!is.na(input$date[1]) & !is.na(input$date[2]), "Error: Please provide both a start and an end date."))
@@ -91,6 +110,7 @@ server <- function(input, output) {
     
     })
   
+  #subset baseflow record based on date range
   sel_bf <- reactive({
     req(input$date)
     validate(need(!is.na(input$date[1]) & !is.na(input$date[2]), "Error: Please provide both a start and an end date."))
@@ -98,17 +118,13 @@ server <- function(input, output) {
     
     Q_narm$BF <- BaseflowSeparation(Q_narm$GGwsd[is.na(Q_narm$GGwsd)==FALSE], input$filter)$bt
     Q_narm$BFQ <- BaseflowSeparation(Q_narm$disch[is.na(Q_narm$disch)==FALSE], input$filter)$bt
-   
-    #make static ECDF of entire bf data record
-    #bfecdf_all <- ecdf(Q_narm$BFQ)
-    #bfQrange_all <- seq(0,max(Q_narm$BFQ, na.rm = TRUE),.1)
-    #bfProbs_all <- bfecdf_all(bfQrange_all)
     
-   Q_narm %>%
+    Q_narm %>%
       filter(time > as.POSIXct(input$date[1]) & time < as.POSIXct(input$date[2]))
     
   })
   
+  #run baseflow separation and create ecdf for baseflow
   sel_bfecdf <- reactive({
     req(input$filter)
     #validate(need(!is.na(input$date[1]) & !is.na(input$date[2]), "Error: Please provide both a start and an end date."))
@@ -117,7 +133,7 @@ server <- function(input, output) {
     #Q_narm$BF <- BaseflowSeparation(Q_narm$GGwsd[is.na(Q_narm$GGwsd)==FALSE], input$filter)$bt
     Q_narm$BFQ <- BaseflowSeparation(Q_narm$disch[is.na(Q_narm$disch)==FALSE], input$filter)$bt
     
-    #make static ECDF of entire bf data record
+    #make static ECDF of entire baseflow data record
     bfecdf_all <- ecdf(Q_narm$BFQ)
     bfQrange_all <- seq(0,max(Q_narm$BFQ),.1)
     bfProbs_all <- bfecdf_all(bfQrange_all)
@@ -125,6 +141,7 @@ server <- function(input, output) {
     BFECDF <- cbind(bfProbs_all,bfQrange_all)
   })
   
+  #subset precip record based on date range
   selected_weather <- reactive({
     req(input$date)
     validate(need(!is.na(input$date[1]) & !is.na(input$date[2]), "Error: Please provide both a start and an end date."))
@@ -141,11 +158,13 @@ server <- function(input, output) {
     if(input$type == "Discharge (L/s)") {
       toplot <- selected_data()$disch
       bf <- sel_bf()$BFQ
-      }
+    }
+    
     if(input$type == "Discharge (mm/day)") {
       toplot <- selected_data()$GGwsd
       bf <- sel_bf()$BF
     }
+    
     if(input$type == "Water Temperature (C)") toplot <- selected_data()$TEMPERATURE
     logged <- ''
     if(input$log) logged <- 'y'
@@ -155,7 +174,6 @@ server <- function(input, output) {
     xhigh <- as.POSIXct(input$date[2]) 
     
     #calculate total discharge in mm
-    
     perhour <- selected_data()$GGwsd/24 #days to hours
     
     Qtotal <- sum(perhour, na.rm = TRUE) #* numofdays 
@@ -172,6 +190,7 @@ server <- function(input, output) {
     Qtext <- max(toplot, na.rm = TRUE) - (max(toplot, na.rm = TRUE)/20)
     
     par(mar = c(0,4,0,4), cex = input$mag)
+    
     #precip plot
     plot(x = selected_weather()$Date[selected_weather()$Precmm>0], y = selected_weather()$Precmm[selected_weather()$Precmm>0], 
            type = 'h', xlim = c(xlow, xhigh), lend = 2,lwd = input$pwidth,xlab = '', xaxt = 'n', ylab = "Precip (mm)",
@@ -229,10 +248,12 @@ server <- function(input, output) {
     #c(bottom, left, top, right)
     par(mar = c(4, 4, 1, 4))
     
+    #plot probability of non-exceedance plot for discharge
     plot(Qrange_all, Probs_all*100, type = 'l', ylab = "Probability of Non-Exceedance (%)", xlab = "Discharge (L/s)",lwd=2)
     legend("bottomright", legend = c("Full Time Period", "Selected Time Period"), lwd = 2, col = c("black", "red"))
     points(Qrange_sel, probs_user*100, type = 'l', col = "red", lwd = 2)
     
+    #plot probability of non-exceedance plot for baseflow, if baseflow is checked
     if(input$bf){
     plot(sel_bfecdf()[,2], sel_bfecdf()[,1]*100, type = 'l',lwd = 2, ylab = "Probability of Non-Exceedance (%)", xlab = "Baseflow (L/s)") 
     points(bfQrange_sel, bfprobs_user*100, type = 'l', lwd = 2, col = "red")
